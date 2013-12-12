@@ -61,23 +61,23 @@ impl MarkSymbolVisitor {
         }
     }
 
-    fn lookup_and_handle_definition(&mut self, id: &ast::NodeId,
-                                    span: codemap::Span) {
-        let def = match self.tcx.def_map.find(id) {
-            Some(&def) => def,
-            None => self.tcx.sess.span_bug(span, "def ID not in def map?!"),
-        };
-        let def_id = match def {
-            ast::DefVariant(enum_id, _, _) => Some(enum_id),
-            ast::DefPrimTy(_) => None,
-            _ => Some(def_id_of_def(def)),
-        };
-        match def_id {
-            Some(def_id) => {
-                if should_explore(self.tcx, def_id) {
-                    self.worklist.push(def_id.node);
+    fn lookup_and_handle_definition(&mut self, id: &ast::NodeId) {
+        match self.tcx.def_map.find(id) {
+            Some(&def) => {
+                let def_id = match def {
+                    ast::DefVariant(enum_id, _, _) => Some(enum_id),
+                    ast::DefPrimTy(_) => None,
+                    _ => Some(def_id_of_def(def)),
+                };
+                match def_id {
+                    Some(def_id) => {
+                        if should_explore(self.tcx, def_id) {
+                            self.worklist.push(def_id.node);
+                        }
+                        self.live_symbols.insert(def_id.node);
+                    }
+                    None => (),
                 }
-                self.live_symbols.insert(def_id.node);
             }
             None => (),
         }
@@ -129,9 +129,6 @@ impl Visitor<()> for MarkSymbolVisitor {
 
     fn visit_expr(&mut self, expr: @ast::Expr, _: ()) {
         match expr.node {
-            ast::ExprPath(_) | ast::ExprStruct(..) => {
-                self.lookup_and_handle_definition(&expr.id, expr.span);
-            }
             ast::ExprMethodCall(..) => {
                 match self.method_map.find(&expr.id) {
                     Some(&typeck::method_map_entry {
@@ -160,10 +157,14 @@ impl Visitor<()> for MarkSymbolVisitor {
     fn visit_ty(&mut self, typ: &ast::Ty, _: ()) {
         match typ.node {
             ast::ty_path(_, _, ref id) => {
-                self.lookup_and_handle_definition(id, typ.span);
+                self.lookup_and_handle_definition(id);
             }
             _ => visit::walk_ty(self, typ, ()),
         }
+    }
+
+    fn visit_path(&mut self, _: &ast::Path, id: ast::NodeId, _: ()) {
+        self.lookup_and_handle_definition(&id);
     }
 
     fn visit_item(&mut self, _item: @ast::item, _: ()) {
